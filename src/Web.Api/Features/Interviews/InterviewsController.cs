@@ -15,6 +15,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using TechInterviewer.Features.Interviews.Models;
+using TechInterviewer.Features.Interviews.RevokeShareLinkToken;
 using TechInterviewer.Features.Labels.Models;
 using TechInterviewer.Setup.Attributes;
 
@@ -193,6 +194,66 @@ public class InterviewsController : ControllerBase
 
         await _context.TrySaveChangesAsync(cancellationToken);
         return Ok();
+    }
+
+    [HttpPost("{id:guid}/get-share-token")]
+    public async Task<GetShareLinkTokenResult> GetShareToken(
+        Guid id,
+        CancellationToken cancellationToken)
+    {
+        var interview = await _context.Interviews
+            .Include(x => x.ShareLink)
+            .ByIdOrFailAsync(id, cancellationToken);
+
+        if (interview.ShareLink == null)
+        {
+            var shareLink = await _context.SaveAsync(new ShareLink(interview), cancellationToken);
+            return new GetShareLinkTokenResult(shareLink);
+        }
+
+        return new GetShareLinkTokenResult(interview.ShareLink);
+    }
+
+    [HttpPost("{id:guid}/revoke-share-link")]
+    public async Task<GetShareLinkTokenResult> RevokeShareLink(
+        Guid id,
+        CancellationToken cancellationToken)
+    {
+        var interview = await _context.Interviews
+            .Include(x => x.ShareLink)
+            .ByIdOrFailAsync(id, cancellationToken);
+
+        if (interview.ShareLink == null)
+        {
+            var shareLink = await _context.SaveAsync(new ShareLink(interview), cancellationToken);
+            return new GetShareLinkTokenResult(shareLink);
+        }
+
+        interview.ShareLink.RevokeToken();
+        await _context.TrySaveChangesAsync(cancellationToken);
+
+        return new GetShareLinkTokenResult(interview.ShareLink);
+    }
+
+    [HttpGet("{id:guid}/with-token/{secret_token:guid}")]
+    public async Task<IActionResult> GetInterviewByShareToken(
+        [FromRoute(Name = "id")] Guid interviewId,
+        [FromRoute(Name = "secret_token")] Guid shareToken,
+        CancellationToken cancellationToken)
+    {
+        var interview = await _context.Interviews
+            .Include(x => x.ShareLink)
+            .Include(x => x.Labels)
+            .Where(i => i.Id == interviewId && i.ShareLink.ShareToken == shareToken)
+            .AsNoTracking()
+            .SingleOrDefaultAsync(cancellationToken);
+
+        if (interview == null)
+        {
+            throw new NotFoundException($"Did not find any {nameof(Interview)} by shareToken {shareToken}");
+        }
+
+        return Ok(new InterviewDto(interview));
     }
 
     private static void CheckPermissions(Interview interviewTemplate, User currentUser)
