@@ -8,6 +8,7 @@ using Domain.Entities.Enums;
 using Domain.Entities.Salaries;
 using Domain.Entities.Telegram;
 using Domain.Extensions;
+using Infrastructure.Currencies.Contracts;
 using Infrastructure.Database;
 using Infrastructure.Salaries;
 using Infrastructure.Services.Global;
@@ -34,17 +35,20 @@ public class ProcessTelegramMessageHandler : IRequestHandler<ProcessTelegramMess
     private const int CachingMinutes = 20;
 
     private readonly ILogger<ProcessTelegramMessageHandler> _logger;
+    private readonly ICurrencyService _currencyService;
     private readonly DatabaseContext _context;
     private readonly IMemoryCache _cache;
     private readonly IGlobal _global;
 
     public ProcessTelegramMessageHandler(
         ILogger<ProcessTelegramMessageHandler> logger,
+        ICurrencyService currencyService,
         DatabaseContext context,
         IMemoryCache cache,
         IGlobal global)
     {
         _logger = logger;
+        _currencyService = currencyService;
         _context = context;
         _cache = cache;
         _global = global;
@@ -65,7 +69,8 @@ public class ProcessTelegramMessageHandler : IRequestHandler<ProcessTelegramMess
                     .ToListAsync(cancellationToken);
             });
 
-        if (request.UpdateRequest.Type == UpdateType.InlineQuery && request.UpdateRequest.InlineQuery != null)
+        if (request.UpdateRequest.Type == UpdateType.InlineQuery &&
+            request.UpdateRequest.InlineQuery != null)
         {
             await ProcessInlineQueryAsync(
                 request.BotClient,
@@ -171,69 +176,96 @@ public class ProcessTelegramMessageHandler : IRequestHandler<ProcessTelegramMess
         var frontendLink = new SalariesChartPageLink(_global, requestParams);
         var professions = requestParams.GetProfessionsTitleOrNull();
 
+        var currencies = await _currencyService.GetCurrenciesAsync();
+        string replyText;
+        double juniorMedian = 0;
+        double middleMedian = 0;
+        double seniorMedian = 0;
+        double leadMedian = 0;
+
+        if (salaries.Count > 0)
+        {
+            juniorMedian = salaries.Where(x => x.Grade == DeveloperGrade.Junior).Select(x => x.Value).Median();
+            middleMedian = salaries.Where(x => x.Grade == DeveloperGrade.Middle).Select(x => x.Value).Median();
+            seniorMedian = salaries.Where(x => x.Grade == DeveloperGrade.Senior).Select(x => x.Value).Median();
+            leadMedian = salaries.Where(x => x.Grade == DeveloperGrade.Lead).Select(x => x.Value).Median();
+        }
+
         if (salaries.Count > 0 || Debugger.IsAttached)
         {
-            string replyText;
-            if (salaries.Count > 0)
-            {
-                var juniorMedian = salaries.Where(x => x.Grade == DeveloperGrade.Junior).Select(x => x.Value).Median();
-                var middleMedian = salaries.Where(x => x.Grade == DeveloperGrade.Middle).Select(x => x.Value).Median();
-                var seniorMedian = salaries.Where(x => x.Grade == DeveloperGrade.Senior).Select(x => x.Value).Median();
-                var leadMedian = salaries.Where(x => x.Grade == DeveloperGrade.Lead).Select(x => x.Value).Median();
-
-                replyText = @$"Зарплаты {professions ?? "специалистов IT в Казахстане"} по грейдам:
+            replyText = @$"Зарплаты {professions ?? "специалистов IT в Казахстане"} по грейдам:
 ";
 
-                if (juniorMedian > 0)
+            if (juniorMedian > 0)
+            {
+                var resStr = $"<b>{juniorMedian:N0}</b> тг.";
+                foreach (var currencyContent in currencies)
                 {
-                    replyText += @$"
-Джуны:   <b>{juniorMedian:N0}</b> тг.";
-                }
-
-                if (middleMedian > 0)
-                {
-                    replyText += @$"
-Миддлы:  <b>{middleMedian:N0}</b> тг.";
-                }
-
-                if (seniorMedian > 0)
-                {
-                    replyText += @$"
-Сеньоры: <b>{seniorMedian:N0}</b> тг.";
-                }
-
-                if (leadMedian > 0)
-                {
-                    replyText += @$"
-Лиды:    <b>{leadMedian:N0}</b> тг.";
+                    resStr += $" (~{juniorMedian / currencyContent.Value:N0}{currencyContent.CurrencyString})";
                 }
 
                 replyText += @$"
+Джуны:   {resStr}";
+            }
+
+            if (middleMedian > 0)
+            {
+                var resStr = $"<b>{middleMedian:N0}</b> тг.";
+                foreach (var currencyContent in currencies)
+                {
+                    resStr += $" (~{middleMedian / currencyContent.Value:N0}{currencyContent.CurrencyString})";
+                }
+
+                replyText += @$"
+Миддлы:  {resStr}";
+            }
+
+            if (seniorMedian > 0)
+            {
+                var resStr = $"<b>{seniorMedian:N0}</b> тг.";
+                foreach (var currencyContent in currencies)
+                {
+                    resStr += $" (~{seniorMedian / currencyContent.Value:N0}{currencyContent.CurrencyString})";
+                }
+
+                replyText += @$"
+Сеньоры:  {resStr}";
+            }
+
+            if (leadMedian > 0)
+            {
+                var resStr = $"<b>{leadMedian:N0}</b> тг.";
+                foreach (var currencyContent in currencies)
+                {
+                    resStr += $" (~{leadMedian / currencyContent.Value:N0}{currencyContent.CurrencyString})";
+                }
+
+                replyText += @$"
+Лиды:     {resStr}";
+            }
+
+            replyText += @$"
 
 <em>Расчитано на основе {totalCount} анкет(ы)</em>
 <em>Подробно на сайте <a href=""{frontendLink}"">{ApplicationName}</a></em>";
-            }
-            else
-            {
-                replyText = professions != null
-                    ? $"Пока никто не оставил информацию о зарплатах для {professions}."
-                    : "Пока никто не оставлял информации о зарплатах.";
+        }
+        else
+        {
+            replyText = professions != null
+                ? $"Пока никто не оставил информацию о зарплатах для {professions}."
+                : "Пока никто не оставлял информации о зарплатах.";
 
-                replyText += @$"
+            replyText += @$"
 
 <em>Посмотреть зарплаты по другим специальностям можно на сайте <a href=""{frontendLink}"">{ApplicationName}</a></em>";
-            }
-
-            return new TelegramBotReplyData(
-                replyText.Trim(),
-                new InlineKeyboardMarkup(
-                    InlineKeyboardButton.WithUrl(
-                        text: ApplicationName,
-                        url: frontendLink.ToString())));
         }
 
         return new TelegramBotReplyData(
-            "Нет информации о зарплатах =(");
+            replyText.Trim(),
+            new InlineKeyboardMarkup(
+                InlineKeyboardButton.WithUrl(
+                    text: ApplicationName,
+                    url: frontendLink.ToString())));
     }
 
     private async Task ProcessInlineQueryAsync(
