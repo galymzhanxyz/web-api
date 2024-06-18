@@ -4,9 +4,9 @@ using Domain.Entities.Enums;
 using Domain.Entities.Salaries;
 using Domain.ValueObjects.Dates;
 using Infrastructure.Salaries;
-using TechInterviewer.Features.Salaries.GetSalariesHistoricalChart.Charts;
+using Web.Api.Features.Historical.GetSalariesHistoricalChart.Charts;
 
-namespace TechInterviewer.Features.Salaries.GetSalariesHistoricalChart;
+namespace Web.Api.Features.Historical.GetSalariesHistoricalChart;
 
 public record GetSalariesHistoricalChartResponse
 {
@@ -25,9 +25,9 @@ public record GetSalariesHistoricalChartResponse
     public GetSalariesHistoricalChartResponse(
         List<UserSalarySimpleDto> salaries,
         DateTimeOffset from,
-        DateTimeOffset to)
+        DateTimeOffset to,
+        bool addGradeChartData)
     {
-        Salaries = salaries;
         From = from;
         To = to;
         HasAuthentication = true;
@@ -58,10 +58,9 @@ public record GetSalariesHistoricalChartResponse
         SalariesCountWeekByWeekChart = new SalariesCountWeekByWeekChart(
             localSalaries,
             remoteSalaries,
-            weekSplitter);
+            weekSplitter,
+            addGradeChartData);
     }
-
-    public List<UserSalarySimpleDto> Salaries { get; private set; }
 
     public SalariesCountWeekByWeekChart SalariesCountWeekByWeekChart { get; private set; }
 
