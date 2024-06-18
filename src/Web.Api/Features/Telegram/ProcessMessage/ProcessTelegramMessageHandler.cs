@@ -1,12 +1,7 @@
 ﻿using System;
-using System.Globalization;
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Domain.Entities.Salaries;
 using Domain.Entities.Telegram;
-using Domain.Enums;
-using Domain.Extensions;
 using Infrastructure.Currencies.Contracts;
 using Infrastructure.Database;
 using Infrastructure.Salaries;
@@ -16,12 +11,12 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using TechInterviewer.Features.Telegram.ProcessMessage.InlineQuery;
-using TechInterviewer.Features.Telegram.ProcessMessage.UserCommands;
 using Telegram.Bot;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
-using Telegram.Bot.Types.ReplyMarkups;
+using Web.Api.Features.Telegram.GetTelegramBotUsages;
 using Web.Api.Features.Telegram.ProcessMessage.UserCommands;
+using Web.Api.Features.Telegram.ReplyWithSalaries;
 
 namespace Web.Api.Features.Telegram.ProcessMessage;
 
@@ -134,9 +129,10 @@ public class ProcessTelegramMessageHandler : IRequestHandler<ProcessTelegramMess
                 async entry =>
                 {
                     entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(CachingMinutes);
-                    return await ReplyWithSalariesAsync(
-                        parameters,
-                        cancellationToken);
+                    return await _mediator.Send(
+                                    new ReplyWithSalariesCommand(
+                                            parameters,
+                                            ApplicationName), cancellationToken);
                 });
 
             var replyToMessageId = request.UpdateRequest.Message.ReplyToMessage?.MessageId ?? request.UpdateRequest.Message.MessageId;
@@ -159,114 +155,16 @@ public class ProcessTelegramMessageHandler : IRequestHandler<ProcessTelegramMess
                     _ => TelegramBotUsageType.Undefined,
                 };
 
-                await GetOrCreateTelegramBotUsageAsync(
-                    message.From.Username ?? $"{message.From.FirstName} {message.From.LastName}".Trim(),
-                    message.Chat.Title ?? message.Chat.Username ?? message.Chat.Id.ToString(),
-                    messageText,
-                    usageType,
-                    cancellationToken);
+                await _mediator.Send(
+                        new GetOrCreateTelegramBotUsageCommand(
+                            message.From.Username ?? $"{message.From.FirstName} {message.From.LastName}".Trim(),
+                            message.Chat.Title ?? message.Chat.Username ?? message.Chat.Id.ToString(),
+                            messageText,
+                            usageType),
+                        cancellationToken);
             }
         }
 
         return replyData?.ReplyText;
-    }
-
-    private async Task<TelegramBotReplyData> ReplyWithSalariesAsync(
-        TelegramBotUserCommandParameters requestParams,
-        CancellationToken cancellationToken)
-    {
-        var salariesQuery = new SalariesForChartQuery(
-            _context,
-            requestParams,
-            DateTimeOffset.Now.AddMonths(-12),
-            DateTimeOffset.Now);
-
-        var totalCount = await salariesQuery.ToQueryable().CountAsync(cancellationToken);
-        var salaries = await salariesQuery
-            .ToQueryable(CompanyType.Local)
-            .Select(x => new
-            {
-                x.Grade,
-                x.Value,
-            })
-            .ToListAsync(cancellationToken);
-
-        var frontendLink = new SalariesChartPageLink(_global, requestParams);
-        var professions = requestParams.GetProfessionsTitleOrNull();
-
-        string replyText;
-        if (salaries.Count > 0)
-        {
-            var currencies = await _currencyService.GetCurrenciesAsync(
-                [Currency.USD],
-                cancellationToken);
-
-            var gradeGroups = EnumHelper
-                     .Values<GradeGroup>()
-                     .Where(x => x is not(GradeGroup.Undefined or GradeGroup.Trainee));
-
-            replyText = $"Зарплаты {professions ?? "специалистов IT в Казахстане"} по грейдам:\n";
-
-            foreach (var gradeGroup in gradeGroups)
-            {
-                var median = salaries
-                                .Where(x => x.Grade.GetGroupNameOrNull() == gradeGroup)
-                                .Select(x => x.Value)
-                                .Median();
-
-                if (median > 0)
-                {
-                    var resStr = $"<b>{median.ToString("N0", CultureInfo.InvariantCulture)}</b> тг.";
-                    foreach (var currencyContent in currencies)
-                    {
-                        resStr += $" (~{(median / currencyContent.Value).ToString("N0", CultureInfo.InvariantCulture)}{currencyContent.CurrencyString})";
-                    }
-
-                    replyText += $"\n{gradeGroup.ToCustomString()}: {resStr}";
-                }
-            }
-
-            replyText += $"<em>\n\nРассчитано на основе {totalCount} анкет(ы)</em>" +
-                $"\n<em>Подробно на сайте <a href=\"{frontendLink}\">{ApplicationName}</a></em>";
-        }
-        else
-        {
-            replyText = professions != null
-                ? $"Пока никто не оставил информацию о зарплатах для {professions}."
-                : "Пока никто не оставлял информации о зарплатах.";
-
-            replyText += $"\n\n<em>Посмотреть зарплаты по другим специальностям можно " +
-                $"на сайте <a href=\"{frontendLink}\">{ApplicationName}</a></em>";
-        }
-
-        return new TelegramBotReplyData(
-            replyText.Trim(),
-            new InlineKeyboardMarkup(
-                InlineKeyboardButton.WithUrl(
-                    text: ApplicationName,
-                    url: frontendLink.ToString())));
-    }
-
-    private async Task GetOrCreateTelegramBotUsageAsync(
-        string username,
-        string channelName,
-        string receivedMessageTextOrNull,
-        TelegramBotUsageType usageType,
-        CancellationToken cancellationToken)
-    {
-        var usage = await _context
-            .TelegramBotUsages
-            .FirstOrDefaultAsync(
-                x => x.Username == username && x.UsageType == usageType,
-                cancellationToken);
-
-        if (usage == null)
-        {
-            usage = new TelegramBotUsage(username, channelName, usageType);
-            _context.TelegramBotUsages.Add(usage);
-        }
-
-        usage.IncrementUsageCount(receivedMessageTextOrNull);
-        await _context.SaveChangesAsync(cancellationToken);
     }
 }
