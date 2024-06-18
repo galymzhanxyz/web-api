@@ -5,6 +5,7 @@ using Domain.Entities.Enums;
 using Domain.Entities.Salaries;
 using Domain.Enums;
 using Infrastructure.Database;
+using MediatR;
 using MemoryCache.Testing.Moq;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -57,9 +58,11 @@ namespace Web.Api.Tests.Telegram
 
             var mockedCache = Create.MockedMemoryCache();
             var telegramBotClient = new Mock<ITelegramBotClient>();
+            var mediator = new Mock<IMediator>();
 
             var processTelegramMessageHandler = new ProcessTelegramMessageHandler(
                 logger.Object,
+                mediator.Object,
                 currencyService,
                 context,
                 mockedCache,
@@ -93,9 +96,11 @@ namespace Web.Api.Tests.Telegram
 
             var mockedCache = Create.MockedMemoryCache();
             var telegramBotClient = new Mock<ITelegramBotClient>();
+            var mediator = new Mock<IMediator>();
 
             var processTelegramMessageHandler = new ProcessTelegramMessageHandler(
                 logger.Object,
+                mediator.Object,
                 currencyService,
                 context,
                 mockedCache,

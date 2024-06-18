@@ -9,6 +9,13 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Remove="Features\Telegram\AdminTools\**" />
+    <Content Remove="Features\Telegram\AdminTools\**" />
+    <EmbeddedResource Remove="Features\Telegram\AdminTools\**" />
+    <None Remove="Features\Telegram\AdminTools\**" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="MaximGorbatyuk.DatabaseSqlEndpoints" Version="1.0.14" />
     <PackageReference Include="MediatR" Version="12.3.0" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.6" />
